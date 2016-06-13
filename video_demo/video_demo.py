@@ -1,10 +1,20 @@
 import ctypes
 import numpy as np
 import time
-import cv2
+from cv2 import *
 import sys
+from numba import jit
+from common import clock, draw_str, StatValue, image_clamp
 
-from common import clock, draw_str
+
+"""Function to perform OpenCV Unsharp Masking"""
+@jit("uint8[::](uint8[::],float64,float64)",cache=True,nogil=True)
+def uscv(image,weight,threshold):
+    weight=0.5
+    mask=image
+    blurred=GaussianBlur(image,(9,9),10.0)
+    sharp=addWeighted(image,(1+weight),blurred,(-weight),0)
+    return sharp
 
 # load polymage shared libraries
 libharris = ctypes.cdll.LoadLibrary("./harris.so")
@@ -28,13 +38,12 @@ bilateral_naive = libbilateral_naive.pipeline_bilateral_naive
 laplacian = liblaplacian.pipeline_laplacian
 laplacian_naive = liblaplacian_naive.pipeline_laplacian_naive
 
-fn = sys.argv[1]
-cap = cv2.VideoCapture(fn)
+cap = VideoCapture(sys.argv[1])
 
 frames = 0
 startTime = time.clock()
 
-cv_mode = True
+cv_mode = False
 naive_mode = False
 
 harris_mode = False
@@ -46,8 +55,32 @@ thresh = 0.001
 weight = 3
 
 levels = 4
-alpha = 1.0 / (levels - 1)
+alpha = 1.0/(levels-1)
 beta = 1.0
+
+"""Frame Delay Accumulators for each mode"""
+sun=0.0
+su=0.0
+sln=0.0
+sl=0.0
+sbn=0.0
+sb=0.0
+shc=0.0
+skuscv=0.0
+shn=0.0
+sho=0.0
+
+"""Frame Count for each mode"""
+fun=0
+fu=0
+fln=0
+fl=0
+fbn=0
+fb=0
+fhc=0
+fkuscv=0
+fho=0
+fhn=0
 
 libharris_naive.pool_init()
 libharris.pool_init()
@@ -61,49 +94,50 @@ liblaplacian.pool_init()
 libbilateral_naive.pool_init()
 libbilateral.pool_init()
 
-# Thickness setting has been moved from openCV to openCV 2.
-# So, just use the raw value for CV_FILLED = -1
-CV_THICKNESS_FILLED = -1
+namedWindow("Video",WINDOW_NORMAL)
 
 while(cap.isOpened()):
+    frames += 1
     ret, frame = cap.read()
-
     frameStart = clock()
     rows = frame.shape[0]
     cols = frame.shape[1]
     if harris_mode:
         if cv_mode:
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray = cvtColor(frame, COLOR_BGR2GRAY)
             gray = np.float32(gray) / 4.0
-            res = cv2.cornerHarris(gray, 3, 3, 0.04)
+            res = cornerHarris(gray, 3, 3, 0.04)
         else:
             res = np.empty((rows, cols), np.float32)
             if naive_mode:
-                harris_naive(ctypes.c_int(cols - 2),
-                             ctypes.c_int(rows - 2),
-                             ctypes.c_void_p(frame.ctypes.data),
+                harris_naive(ctypes.c_int(cols-2), \
+                             ctypes.c_int(rows-2), \
+                             ctypes.c_void_p(frame.ctypes.data), \
                              ctypes.c_void_p(res.ctypes.data))
             else:
-                harris(ctypes.c_int(cols - 2),
-                       ctypes.c_int(rows - 2),
-                       ctypes.c_void_p(frame.ctypes.data),
+                harris(ctypes.c_int(cols-2), \
+                       ctypes.c_int(rows-2), \
+                       ctypes.c_void_p(frame.ctypes.data), \
                        ctypes.c_void_p(res.ctypes.data))
 
     elif unsharp_mode:
-        res = np.empty((rows - 4, cols - 4, 3), np.float32)
-        if naive_mode:
-            unsharp_naive(ctypes.c_int(cols - 4),
-                          ctypes.c_int(rows - 4),
-                          ctypes.c_float(thresh),
-                          ctypes.c_float(weight),
-                          ctypes.c_void_p(frame.ctypes.data),
-                          ctypes.c_void_p(res.ctypes.data))
+        if cv_mode:
+            res=uscv(frame,weight,thresh)
         else:
-            unsharp(ctypes.c_int(cols - 4),
-                    ctypes.c_int(rows - 4),
-                    ctypes.c_float(thresh),
-                    ctypes.c_float(weight),
-                    ctypes.c_void_p(frame.ctypes.data),
+            res = np.empty((rows-4, cols-4, 3), np.float32)
+            if naive_mode:
+                unsharp_naive(ctypes.c_int(cols - 4), \
+                          ctypes.c_int(rows - 4), \
+                          ctypes.c_float(thresh), \
+                          ctypes.c_float(weight), \
+                          ctypes.c_void_p(frame.ctypes.data), \
+                          ctypes.c_void_p(res.ctypes.data))
+            else:
+                unsharp(ctypes.c_int(cols-4), \
+                    ctypes.c_int(rows-4), \
+                    ctypes.c_float(thresh), \
+                    ctypes.c_float(weight), \
+                    ctypes.c_void_p(frame.ctypes.data), \
                     ctypes.c_void_p(res.ctypes.data))
 
     elif laplacian_mode:
@@ -112,52 +146,91 @@ while(cap.isOpened()):
         res = np.empty((rows, cols, 3), np.uint8)
 
         if naive_mode:
-            laplacian_naive(ctypes.c_int(cols + total_pad),
-                            ctypes.c_int(rows + total_pad),
-                            ctypes.c_float(alpha),
-                            ctypes.c_float(beta),
-                            ctypes.c_void_p(frame.ctypes.data),
+            laplacian_naive(ctypes.c_int(cols+total_pad), \
+                            ctypes.c_int(rows+total_pad), \
+                            ctypes.c_float(alpha), \
+                            ctypes.c_float(beta), \
+                            ctypes.c_void_p(frame.ctypes.data), \
                             ctypes.c_void_p(res.ctypes.data))
         else:
-            laplacian(ctypes.c_int(cols + total_pad),
-                      ctypes.c_int(rows + total_pad),
-                      ctypes.c_float(alpha),
-                      ctypes.c_float(beta),
-                      ctypes.c_void_p(frame.ctypes.data),
+            laplacian(ctypes.c_int(cols+total_pad), \
+                      ctypes.c_int(rows+total_pad), \
+                      ctypes.c_float(alpha), \
+                      ctypes.c_float(beta), \
+                      ctypes.c_void_p(frame.ctypes.data), \
                       ctypes.c_void_p(res.ctypes.data))
 
     elif bilateral_mode:
         res = np.empty((rows, cols), np.float32)
         if naive_mode:
-            bilateral_naive(ctypes.c_int(cols + 56),
-                            ctypes.c_int(rows + 56),
-                            ctypes.c_void_p(frame.ctypes.data),
+            bilateral_naive(ctypes.c_int(cols+56), \
+                            ctypes.c_int(rows+56), \
+                            ctypes.c_void_p(frame.ctypes.data), \
                             ctypes.c_void_p(res.ctypes.data))
         else:
-            bilateral(ctypes.c_int(cols + 56),
-                      ctypes.c_int(rows + 56),
-                      ctypes.c_void_p(frame.ctypes.data),
+            bilateral(ctypes.c_int(cols+56), \
+                      ctypes.c_int(rows+56), \
+                      ctypes.c_void_p(frame.ctypes.data), \
                       ctypes.c_void_p(res.ctypes.data))
+
+
     else:
         res = frame
 
     frameEnd = clock()
+    value=frameEnd*1000-frameStart*1000
 
-    cv2.rectangle(res, (0, 0), (750, 150), (255, 255, 255),
-                  thickness=CV_THICKNESS_FILLED)
+    """Conditions to sum the values of frame delay accumulators and frame counters deoending on the mode"""
+    if harris_mode:
+        if cv_mode:
+            shc+=value
+            fhc+=1
+        elif naive_mode:
+            shn+=value
+            fhn+=1
+        else:
+            sho+=value
+            fho+=1
+    elif unsharp_mode:
+        if cv_mode:
+            fkuscv+=1
+            skuscv+=value
+        elif naive_mode:
+            sun+=value
+            fun+=1
+        else:
+            su+=value
+            fu+=1
 
-    draw_str(res, (40, 40),
-             "frame interval :  %.1f ms" %
-             (frameEnd * 1000 - frameStart * 1000))
+    elif laplacian_mode:
+        if cv_mode:
+            sln+=value
+            fln+=1
+        else:
+            sl+=value
+            fl+=1
+
+    elif bilateral_mode:
+        if cv_mode:
+            sbn+=value
+            fbn+=1
+        else:
+            sb+=value
+            fb+=1
+
+    rectangle(res, (0, 0), (750, 150), (255, 255, 255), thickness=cv.CV_FILLED)
+    draw_str(res, (40, 40),      "frame interval :  %.1f ms" % value)
     if cv_mode and harris_mode:
-        draw_str(res, (40, 80), "Pipeline        :  " + str("OpenCV"))
+        draw_str(res, (40, 80),  "Pipeline        :  " + str("OpenCV"))
+    elif cv_mode and unsharp_mode:
+		draw_str(res, (40, 80),  "Pipeline        :  " + str("OpenCV"))
     elif bilateral_mode or harris_mode or unsharp_mode or laplacian_mode:
         if naive_mode:
-            draw_str(res, (40, 80), "Pipeline        :  PolyMage (Naive)")
+            draw_str(res, (40, 80),  "Pipeline        :  " + str("PolyMage (Naive)"))
         else:
-            draw_str(res, (40, 80), "Pipeline        :  PolyMage (Opt)")
+            draw_str(res, (40, 80),  "Pipeline        :  " + str("PolyMage (Opt)"))
     else:
-        draw_str(res, (40, 80), "Pipeline        :  ")
+        draw_str(res, (40, 80),  "Pipeline        :  ")
 
     if harris_mode:
         draw_str(res, (40, 120), "Benchmark    :  " + str("Harris Corner"))
@@ -170,9 +243,9 @@ while(cap.isOpened()):
     else:
         draw_str(res, (40, 120), "Benchmark    :  ")
 
-    cv2.imshow('threaded video', res)
+    imshow('Video', res)
 
-    ch = 0xFF & cv2.waitKey(1)
+    ch = 0xFF & waitKey(1)
     if ch == ord('q'):
         break
     if ch == ord(' '):
@@ -199,7 +272,7 @@ while(cap.isOpened()):
         harris_mode = False
         unsharp_mode = False
         laplacian_mode = False
-    frames += 1
+
 
 libharris_naive.pool_destroy()
 libharris.pool_destroy()
@@ -214,4 +287,29 @@ libbilateral_naive.pool_destroy()
 libbilateral.pool_destroy()
 
 cap.release()
-cv2.destroyAllWindows()
+destroyAllWindows()
+
+
+
+"""Printing the values of Average frame delay for each mode"""
+
+if fhc!=0:
+    print "Average frame delay for Harris (OpenCV) is - ",shc/fhc, "ms"
+if fho!=0:
+	print "Average frame delay for Harris (Opt) is - ",sho/fho, "ms"
+if fhn!=0:
+	print "Average frame delay for Harris (Naive) is - ",shn/fhn, "ms"
+if fun!=0:
+    print "Average frame delay for Unsharp Mask (Naive) is - ",sun/fun, "ms"
+if fu!=0:
+    print "Average frame delay for Unsharp Mask (Opt) is - ",su/fu, "ms"
+if fbn!=0:
+    print "Average frame delay for Bilateral Grid (Naive) is - ",sbn/fbn, "ms"
+if fb!=0:
+    print "Average frame delay for Bilateral Grid (Opt) is - ",sb/fb, "ms"
+if fln!=0:
+    print "Average frame delay for Local Laplacian (Naive) is - ",sln/fln, "ms"
+if fl!=0:
+    print "Average frame delay for Local Laplacian (Opt) is - ",sl/fl, "ms"
+if fkuscv!=0:
+    print "Average frame delay for Unsharp Mask (Python OpenCV) is - ",skuscv/fkuscv, "ms"
