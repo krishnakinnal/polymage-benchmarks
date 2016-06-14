@@ -58,29 +58,19 @@ levels = 4
 alpha = 1.0/(levels-1)
 beta = 1.0
 
-"""Frame Delay Accumulators for each mode"""
-sum_unsharp_naive=0.0
-sum_unsharp_opti=0.0
-sum_laplacian_naive=0.0
-sum_laplacian_opti=0.0
-sum_bilateral_naive=0.0
-sum_bilateral_opti=0.0
-sum_harris_cv=0.0
-sum_unsharp_cv=0.0
-sum_harris_naive=0.0
-sum_harris_opti=0.0
+modes = ['Unsharp Mask (Naive)','Unsharp Mask (Opt)','Laplacian (Naive)','Laplacian (Opt)',\
+            'Bilateral (Naive)','Bilateral (Opt)','Harris OpenCV','Unsharp Mask OpenCV', \
+            'Harris (Naive)','Harris (Opt)']
 
-"""Frame Count for each mode"""
-frames_unsharp_naive=0
-frames_unsharp_opti=0
-frames_laplacian_naive=0
-frames_laplacian_opti=0
-frames_bilateral_naive=0
-frames_bilateral_opti=0
-frames_harris_cv=0
-frames_unsharp_cv=0
-frames_harris_opti=0
-frames_harris_naive=0
+"""Dictionary for accumulators"""
+sums={}
+for mode in modes:
+    sums[mode]=0.0
+
+"""Dictionary for frames"""
+frames={}
+for mode in modes:
+    frames[mode]=0
 
 libharris_naive.pool_init()
 libharris.pool_init()
@@ -183,40 +173,40 @@ while(cap.isOpened()):
     """Conditions to sum the values of frame delay accumulators and frame counters deoending on the mode"""
     if harris_mode:
         if cv_mode:
-            sum_harris_cv+=value
-            frames_harris_cv+=1
+            sums['Harris OpenCV']+=value
+            frames['Harris OpenCV']+=1
         elif naive_mode:
-            sum_harris_naive+=value
-            frames_harris_naive+=1
+            sums['Harris (Naive)']+=value
+            frames['Harris (Naive)']+=1
         else:
-            sum_harris_opti+=value
-            frames_harris_opti+=1
+            sums['Harris (Opt)']+=value
+            frames['Harris (Opt)']+=1
     elif unsharp_mode:
         if cv_mode:
-            frames_unsharp_cv+=1
-            sum_unsharp_cv+=value
+            sums['Unsharp Mask OpenCV']+=value
+            frames['Unsharp Mask OpenCV']+=1
         elif naive_mode:
-            sum_unsharp_naive+=value
-            frames_unsharp_naive+=1
+            sums[Unsharp Mask (Naive)]+=value
+            frames['Unsharp Mask (Naive)']+=1
         else:
-            sum_unsharp_opti+=value
-            frames_unsharp_opti+=1
+            sums['Unsharp Mask (Opt)']+=value
+            frames['Unsharp Mask (Opt)']+=1
 
     elif laplacian_mode:
-        if cv_mode:
-            sum_laplacian_naive+=value
-            frames_laplacian_naive+=1
+        if naive_mode:
+            sums['Laplacian (Naive)']+=value
+            frames['Laplacian (Naive)']+=1
         else:
-            sum_laplacian_opti+=value
-            frames_laplacian_opti+=1
+            sums['Laplacian (Opt)']+=value
+            frames['Laplacian (Opt)']+=1
 
     elif bilateral_mode:
-        if cv_mode:
-            sum_bilateral_naive+=value
-            frames_bilateral_naive+=1
+        if naive_mode:
+            sums['Bilateral (Naive)']+=value
+            frames['Bilateral (Naive)']+=1
         else:
-            sum_bilateral_opti+=value
-            frames_bilateral_opti+=1
+            sums['Bilateral (Opt)']+=value
+            frames['Bilateral (Opt)']+=1
 
     rectangle(res, (0, 0), (750, 150), (255, 255, 255), thickness=cv.CV_FILLED)
     draw_str(res, (40, 40),      "frame interval :  %.1f ms" % value)
@@ -289,27 +279,7 @@ libbilateral.pool_destroy()
 cap.release()
 destroyAllWindows()
 
-
-
-"""Printing the values of Average frame delay for each mode"""
-
-if frames_harris_cv!=0:
-    print "Average frame delay for Harris (OpenCV) is - ",sum_harris_cv/frames_harris_cv, "ms"
-if frames_harris_opti!=0:
-	print "Average frame delay for Harris (Opt) is - ",sum_harris_opti/frames_harris_opti, "ms"
-if frames_harris_naive!=0:
-	print "Average frame delay for Harris (Naive) is - ",sum_harris_naive/frames_harris_naive, "ms"
-if frames_unsharp_naive!=0:
-    print "Average frame delay for Unsharp Mask (Naive) is - ",sum_unsharp_naive/frames_unsharp_naive, "ms"
-if frames_unsharp_opti!=0:
-    print "Average frame delay for Unsharp Mask (Opt) is - ",sum_unsharp_opti/frames_unsharp_opti, "ms"
-if frames_bilateral_naive!=0:
-    print "Average frame delay for Bilateral Grid (Naive) is - ",sum_bilateral_naive/frames_bilateral_naive, "ms"
-if frames_bilateral_opti!=0:
-    print "Average frame delay for Bilateral Grid (Opt) is - ",sum_bilateral_opti/frames_bilateral_opti, "ms"
-if frames_laplacian_naive!=0:
-    print "Average frame delay for Local Laplacian (Naive) is - ",sum_laplacian_naive/frames_laplacian_naive, "ms"
-if frames_laplacian_opti!=0:
-    print "Average frame delay for Local Laplacian (Opt) is - ",sum_laplacian_opti/frames_laplacian_opti, "ms"
-if frames_unsharp_cv!=0:
-    print "Average frame delay for Unsharp Mask (Python OpenCV) is - ",sum_unsharp_cv/frames_unsharp_cv, "ms"
+"""Printing values with dictionary"""
+for mode in frames:
+    if frames[mode]!=0:
+        print "Average frame delay for ",mode," is - ",sums[mode]/frames[mode],"ms"
